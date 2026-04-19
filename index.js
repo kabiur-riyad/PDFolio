@@ -921,9 +921,10 @@ function renderPagesList() {
     });
 
     item.addEventListener('dragover', (e) => {
-      e.preventDefault();
       const draggingItem = document.querySelector('.dragging');
       if (!draggingItem || draggingItem === item) return;
+      // preventDefault is required for drop to work, but we call it here after our check
+      e.preventDefault();
 
       const draggingIndex = parseInt(draggingItem.dataset.index, 10);
       const targetIndex = parseInt(item.dataset.index, 10);
@@ -972,6 +973,10 @@ function renderPagesList() {
 
     list.appendChild(item);
   });
+
+  // Enable auto-scroll on the controls container (not pagesList itself)
+  const controlsContainer = document.getElementById('controls');
+  if (controlsContainer) enableDragAutoScroll(controlsContainer);
 
   const onContext = (e) => {
     const a = e.target && (e.target.closest ? e.target.closest('a') : null);
@@ -1028,6 +1033,51 @@ function updateStyleTargetLabel() {
   if (!el) return;
   const name = themeTarget === 'paper' ? 'Page' : themeTarget === 'text' ? 'Text' : 'Secondary Text';
   el.textContent = `Editing: ${name}`;
+}
+
+// Auto-scroll container when dragging near edges
+function enableDragAutoScroll(container) {
+  let scrollInterval = null;
+  const scrollSpeed = 15;
+  const edgeThreshold = 60; // pixels from edge to trigger scroll
+
+  const stopAutoScroll = () => {
+    if (scrollInterval) {
+      clearInterval(scrollInterval);
+      scrollInterval = null;
+    }
+  };
+
+  container.addEventListener('dragover', (e) => {
+    const dragging = document.querySelector('.dragging');
+    if (!dragging) return;
+
+    const rect = container.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const height = rect.height;
+    const inTopZone = y < edgeThreshold;
+    const inBottomZone = y > height - edgeThreshold;
+
+    if (inTopZone || inBottomZone) {
+      e.preventDefault(); // Need this for auto-scroll to work
+      stopAutoScroll();
+      scrollInterval = setInterval(() => {
+        container.scrollTop += inTopZone ? -scrollSpeed : scrollSpeed;
+      }, 16);
+    } else {
+      stopAutoScroll();
+    }
+  });
+
+  container.addEventListener('dragleave', (e) => {
+    const rect = container.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    // Only stop if actually leaving the container
+    if (y < 0 || y > rect.height) {
+      stopAutoScroll();
+    }
+  });
+  container.addEventListener('drop', stopAutoScroll);
 }
 
 function movePage(fromIndex, toIndex) {
@@ -1221,8 +1271,10 @@ function attachPageInteractions() {
       reader.onload = async (ev) => {
         if (ev.target && typeof ev.target.result === 'string') {
           const dataUrl = ev.target.result;
-          pages[idx].image = dataUrl;
-          try { const year = await extractExifYearFromDataUrl(dataUrl); if (year) { pages[idx].data.year = String(year); } } catch {}
+          // Optimize image before saving
+          const optimizedDataUrl = await optimizeImage(dataUrl);
+          pages[idx].image = optimizedDataUrl;
+          try { const year = await extractExifYearFromDataUrl(optimizedDataUrl); if (year) { pages[idx].data.year = String(year); } } catch {}
           markDirty();
           renderPages();
         }
@@ -1238,46 +1290,56 @@ const fileInput = document.getElementById('fileInput');
 ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); dz.classList.add('drag'); }));
 ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); dz.classList.remove('drag'); }));
 
-dz.addEventListener('drop', (e) => {
+dz.addEventListener('drop', async (e) => {
   e.preventDefault(); e.stopPropagation();
   if (!e.dataTransfer) return;
   const files = Array.from(e.dataTransfer.files).filter((f) => f.type && f.type.startsWith('image'));
   if (files.length === 0) return;
-  files.forEach(file => {
+  for (const file of files) {
     const reader = new FileReader();
-    reader.onload = async (ev) => {
-      if (ev.target && typeof ev.target.result === 'string') {
-        const imageCount = pages.filter(p => p.type === 'single').length;
-        const dataUrl = ev.target.result;
-        const page = { type: 'single', data: { title: `Image ${imageCount + 1}`, year: '', desc: '' }, image: dataUrl };
-        pages.push(page);
-        try { const year = await extractExifYearFromDataUrl(dataUrl); if (year) page.data.year = String(year); } catch {}
-        markDirty();
-        renderPages();
-      }
-    };
-    reader.readAsDataURL(file);
-  });
+    await new Promise((resolve) => {
+      reader.onload = async (ev) => {
+        if (ev.target && typeof ev.target.result === 'string') {
+          const imageCount = pages.filter(p => p.type === 'single').length;
+          const dataUrl = ev.target.result;
+          // Optimize image before saving
+          const optimizedDataUrl = await optimizeImage(dataUrl);
+          const page = { type: 'single', data: { title: `Image ${imageCount + 1}`, year: '', desc: '' }, image: optimizedDataUrl };
+          pages.push(page);
+          try { const year = await extractExifYearFromDataUrl(optimizedDataUrl); if (year) page.data.year = String(year); } catch {}
+          markDirty();
+          renderPages();
+        }
+        resolve();
+      };
+      reader.readAsDataURL(file);
+    });
+  }
 });
 
 dz.addEventListener('click', async () => { fileInput.click(); });
 
-fileInput.addEventListener('change', () => {
+fileInput.addEventListener('change', async () => {
   const files = Array.from(fileInput.files || []).filter((f) => f.type && f.type.startsWith('image'));
-  files.forEach(file => {
+  for (const file of files) {
     const reader = new FileReader();
-    reader.onload = async (ev) => {
-      if (ev.target && typeof ev.target.result === 'string') {
-        const imageCount = pages.filter(p => p.type === 'single').length;
-        const dataUrl = ev.target.result;
-        const page = { type: 'single', data: { title: `Image ${imageCount + 1}`, year: '', desc: '' }, image: dataUrl };
-        pages.push(page);
-        try { const year = await extractExifYearFromDataUrl(dataUrl); if (year) page.data.year = String(year); } catch {}
-        renderPages();
-      }
-    };
-    reader.readAsDataURL(file);
-  });
+    await new Promise((resolve) => {
+      reader.onload = async (ev) => {
+        if (ev.target && typeof ev.target.result === 'string') {
+          const imageCount = pages.filter(p => p.type === 'single').length;
+          const dataUrl = ev.target.result;
+          // Optimize image before saving
+          const optimizedDataUrl = await optimizeImage(dataUrl);
+          const page = { type: 'single', data: { title: `Image ${imageCount + 1}`, year: '', desc: '' }, image: optimizedDataUrl };
+          pages.push(page);
+          try { const year = await extractExifYearFromDataUrl(optimizedDataUrl); if (year) page.data.year = String(year); } catch {}
+          renderPages();
+        }
+        resolve();
+      };
+      reader.readAsDataURL(file);
+    });
+  }
   fileInput.value = '';
 });
 
@@ -1564,6 +1626,76 @@ function findIFDEntry(view, ifdOffset, wantedTag, little) { const getU16 = (pos)
 function readAscii(view, offset, count) { const chars = []; for (let i = 0; i < count && offset + i < view.byteLength; i++) { const c = view.getUint8(offset + i); if (c === 0) break; chars.push(String.fromCharCode(c)); } return chars.join(''); }
 function parseYearFromExifDate(s) { const m = /^([0-9]{4})/.exec(s || ''); return m ? m[1] : null; }
 
+// Image optimization: resize to max 2048px and encode to AVIF
+const MAX_IMAGE_DIMENSION = 2048;
+const AVIF_QUALITY = 90;
+
+async function optimizeImage(dataUrl) {
+  // Skip if already AVIF
+  if (dataUrl.startsWith('data:image/avif')) {
+    return dataUrl;
+  }
+
+  try {
+    // Load image
+    const img = new Image();
+    img.src = dataUrl;
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
+
+    // Calculate new dimensions
+    let { width, height } = img;
+    const maxDim = Math.max(width, height);
+    if (maxDim > MAX_IMAGE_DIMENSION) {
+      const scale = MAX_IMAGE_DIMENSION / maxDim;
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+
+    // Draw to canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, width, height);
+
+    // Get raw image data
+    const imageData = ctx.getImageData(0, 0, width, height);
+
+    // Use Squoosh for AVIF encoding if available
+    if (typeof ImagePool !== 'undefined') {
+      try {
+        const imagePool = new ImagePool();
+        const image = imagePool.ingestImage(imageData);
+        await image.encode({
+          avif: { quality: AVIF_QUALITY }
+        });
+        const encoded = await image.encodedWith.avif;
+        const blob = new Blob([encoded.binary], { type: 'image/avif' });
+        const reader = new FileReader();
+        const result = await new Promise((resolve) => {
+          reader.onload = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
+        await imagePool.close();
+        return result;
+      } catch (avifErr) {
+        console.warn('AVIF encoding failed, falling back to WebP:', avifErr);
+      }
+    }
+
+    // Fallback to WebP if AVIF fails or Squoosh unavailable
+    const webpDataUrl = canvas.toDataURL('image/webp', 0.9);
+    return webpDataUrl;
+
+  } catch (err) {
+    console.error('Image optimization failed:', err);
+    return dataUrl; // Return original on failure
+  }
+}
+
 // Export by printing the current window (no new tab), with theme freeze
 async function exportPortfolioAsPDF() {
   try {
@@ -1599,6 +1731,63 @@ async function exportPortfolioAsPDF() {
 
 document.getElementById('printBtn').addEventListener('click', exportPortfolioAsPDF);
 
+// Track which images have been optimized (by original dataUrl hash)
+const optimizedImages = new Set();
+
+// Optimize all images in the portfolio, showing progress
+async function optimizeAllImages() {
+  // Find images that haven't been optimized yet
+  const pagesNeedingOptimization = pages.filter(p => {
+    if (!p.image) return false;
+    if (p.image.startsWith('data:image/avif')) return false;
+    return !optimizedImages.has(p.image);
+  });
+
+  if (pagesNeedingOptimization.length === 0) return;
+
+  // Create progress modal
+  const progressModal = document.createElement('div');
+  progressModal.className = 'modal show';
+  progressModal.innerHTML = `
+    <div class="modal-content" style="text-align: center;">
+      <h3>Optimizing Images</h3>
+      <p id="optimizeProgress">Processing 0 of ${pagesNeedingOptimization.length} images...</p>
+      <div style="width: 100%; height: 8px; background: #eee; border-radius: 4px; margin: 20px 0;">
+        <div id="optimizeProgressBar" style="width: 0%; height: 100%; background: var(--accent, #4a90d9); border-radius: 4px; transition: width 0.3s;"></div>
+      </div>
+      <p class="small">Converting to AVIF format and resizing to max 2048px</p>
+    </div>
+  `;
+  document.body.appendChild(progressModal);
+
+  let processed = 0;
+  for (let i = 0; i < pages.length; i++) {
+    if (pages[i].image && !pages[i].image.startsWith('data:image/avif') && !optimizedImages.has(pages[i].image)) {
+      try {
+        const originalImage = pages[i].image;
+        pages[i].image = await optimizeImage(originalImage);
+        // Mark this original image as optimized
+        optimizedImages.add(originalImage);
+        processed++;
+
+        // Update progress
+        const progressText = document.getElementById('optimizeProgress');
+        const progressBar = document.getElementById('optimizeProgressBar');
+        if (progressText) progressText.textContent = `Processing ${processed} of ${pagesNeedingOptimization.length} images...`;
+        if (progressBar) progressBar.style.width = `${(processed / pagesNeedingOptimization.length) * 100}%`;
+
+        // Small delay to allow UI to update
+        await new Promise(r => setTimeout(r, 10));
+      } catch (err) {
+        console.warn('Failed to optimize image on page', i, err);
+      }
+    }
+  }
+
+  // Remove progress modal
+  progressModal.remove();
+}
+
 function getPortfolioPayload() {
   return JSON.stringify({ appVersion: 'web', userInfo, pages }, null, 2);
 }
@@ -1631,12 +1820,20 @@ function downloadTextAsFile(text, filename) {
 }
 
 // Save portfolio to localStorage; optionally trigger a JSON download
-async function saveCurrentPortfolio(shouldDownload = false) {
+async function saveCurrentPortfolio(shouldDownload = false, optimizeImages = false) {
   try {
+    // Optimize images if requested
+    if (optimizeImages) {
+      await optimizeAllImages();
+    }
     const payload = await getPortfolioPayload();
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('lastPortfolioJson', payload);
-      localStorage.setItem('hasRun', '1');
+      try {
+        localStorage.setItem('lastPortfolioJson', payload);
+        localStorage.setItem('hasRun', '1');
+      } catch (storageErr) {
+        console.warn('Could not save to localStorage:', storageErr);
+      }
     }
     if (shouldDownload) {
       downloadTextAsFile(payload, 'Portfolio.json');
@@ -1685,6 +1882,8 @@ if (exportJsonBtn) exportJsonBtn.addEventListener('click', async (e) => {
   e.preventDefault();
   e.stopPropagation();
   try {
+    // Optimize images before export
+    await optimizeAllImages();
     const payload = getPortfolioPayload();
     let saved = false;
     // Try native save dialog when supported
@@ -1728,10 +1927,19 @@ if (importJsonBtn) importJsonBtn.addEventListener('click', async () => {
         renderPages();
         clearDirty();
         if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('hasRun', '1');
-          localStorage.setItem('lastPortfolioJson', JSON.stringify({ appVersion: 'web', userInfo, pages }, null, 2));
+          try {
+            localStorage.setItem('hasRun', '1');
+            localStorage.setItem('lastPortfolioJson', JSON.stringify({ appVersion: 'web', userInfo, pages }, null, 2));
+          } catch (storageErr) {
+            console.warn('Could not save to localStorage (quota exceeded):', storageErr);
+            // Import succeeded but couldn't cache - that's okay
+          }
         }
-      } catch { alert('Invalid portfolio JSON'); }
+      } catch (err) {
+        console.error('JSON parse error:', err);
+        console.error('Data received:', res.data?.substring?.(0, 200) || res.data);
+        alert('Invalid portfolio JSON: ' + err.message);
+      }
     }
   } catch {}
 });
