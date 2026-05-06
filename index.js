@@ -1271,10 +1271,11 @@ function attachPageInteractions() {
       reader.onload = async (ev) => {
         if (ev.target && typeof ev.target.result === 'string') {
           const dataUrl = ev.target.result;
+          // Extract year from original image before optimization
+          try { const year = await extractExifYearFromDataUrl(dataUrl); if (year) { pages[idx].data.year = String(year); } } catch {}
           // Optimize image before saving
           const optimizedDataUrl = await optimizeImage(dataUrl);
           pages[idx].image = optimizedDataUrl;
-          try { const year = await extractExifYearFromDataUrl(optimizedDataUrl); if (year) { pages[idx].data.year = String(year); } } catch {}
           markDirty();
           renderPages();
         }
@@ -1302,11 +1303,13 @@ dz.addEventListener('drop', async (e) => {
         if (ev.target && typeof ev.target.result === 'string') {
           const imageCount = pages.filter(p => p.type === 'single').length;
           const dataUrl = ev.target.result;
+          // Extract year from original image before optimization
+          let year = '';
+          try { year = await extractExifYearFromDataUrl(dataUrl); } catch {}
           // Optimize image before saving
           const optimizedDataUrl = await optimizeImage(dataUrl);
-          const page = { type: 'single', data: { title: `Image ${imageCount + 1}`, year: '', desc: '' }, image: optimizedDataUrl };
+          const page = { type: 'single', data: { title: `Image ${imageCount + 1}`, year, desc: '' }, image: optimizedDataUrl };
           pages.push(page);
-          try { const year = await extractExifYearFromDataUrl(optimizedDataUrl); if (year) page.data.year = String(year); } catch {}
           markDirty();
           renderPages();
         }
@@ -1328,11 +1331,13 @@ fileInput.addEventListener('change', async () => {
         if (ev.target && typeof ev.target.result === 'string') {
           const imageCount = pages.filter(p => p.type === 'single').length;
           const dataUrl = ev.target.result;
+          // Extract year from original image before optimization
+          let year = '';
+          try { year = await extractExifYearFromDataUrl(dataUrl); } catch {}
           // Optimize image before saving
           const optimizedDataUrl = await optimizeImage(dataUrl);
-          const page = { type: 'single', data: { title: `Image ${imageCount + 1}`, year: '', desc: '' }, image: optimizedDataUrl };
+          const page = { type: 'single', data: { title: `Image ${imageCount + 1}`, year, desc: '' }, image: optimizedDataUrl };
           pages.push(page);
-          try { const year = await extractExifYearFromDataUrl(optimizedDataUrl); if (year) page.data.year = String(year); } catch {}
           renderPages();
         }
         resolve();
