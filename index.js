@@ -1631,9 +1631,8 @@ function findIFDEntry(view, ifdOffset, wantedTag, little) { const getU16 = (pos)
 function readAscii(view, offset, count) { const chars = []; for (let i = 0; i < count && offset + i < view.byteLength; i++) { const c = view.getUint8(offset + i); if (c === 0) break; chars.push(String.fromCharCode(c)); } return chars.join(''); }
 function parseYearFromExifDate(s) { const m = /^([0-9]{4})/.exec(s || ''); return m ? m[1] : null; }
 
-// Image optimization: resize to max 2048px and encode to AVIF
-const MAX_IMAGE_DIMENSION = 2048;
-const AVIF_QUALITY = 90;
+const MAX_IMAGE_DIMENSION = 3000;
+const AVIF_QUALITY = 95;
 
 async function optimizeImage(dataUrl) {
   // Skip if already AVIF
@@ -1760,7 +1759,7 @@ async function optimizeAllImages() {
       <div style="width: 100%; height: 8px; background: #eee; border-radius: 4px; margin: 20px 0;">
         <div id="optimizeProgressBar" style="width: 0%; height: 100%; background: var(--accent, #4a90d9); border-radius: 4px; transition: width 0.3s;"></div>
       </div>
-      <p class="small">Converting to AVIF format and resizing to max 2048px</p>
+      <p class="small">Converting to AVIF format and resizing to max 4096px</p>
     </div>
   `;
   document.body.appendChild(progressModal);
