@@ -1827,10 +1827,7 @@ function downloadTextAsFile(text, filename) {
 // Save portfolio to localStorage; optionally trigger a JSON download
 async function saveCurrentPortfolio(shouldDownload = false, optimizeImages = false) {
   try {
-    // Optimize images if requested
-    if (optimizeImages) {
-      await optimizeAllImages();
-    }
+    // No optimization on save - only optimize on import to prevent quality degradation
     const payload = await getPortfolioPayload();
     if (typeof localStorage !== 'undefined') {
       try {
@@ -1887,8 +1884,7 @@ if (exportJsonBtn) exportJsonBtn.addEventListener('click', async (e) => {
   e.preventDefault();
   e.stopPropagation();
   try {
-    // Optimize images before export
-    await optimizeAllImages();
+    // No optimization on export - only optimize on import to prevent quality degradation
     const payload = getPortfolioPayload();
     let saved = false;
     // Try native save dialog when supported
