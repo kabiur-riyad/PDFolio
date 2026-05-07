@@ -1304,8 +1304,8 @@ dz.addEventListener('drop', async (e) => {
           const imageCount = pages.filter(p => p.type === 'single').length;
           const dataUrl = ev.target.result;
           // Extract year from original image before optimization
-          let year = '';
-          try { year = await extractExifYearFromDataUrl(dataUrl); } catch {}
+          let year = '0000'; // Default year when EXIF is missing
+          try { const extractedYear = await extractExifYearFromDataUrl(dataUrl); if (extractedYear) year = extractedYear; } catch {}
           // Optimize image before saving
           const optimizedDataUrl = await optimizeImage(dataUrl);
           const page = { type: 'single', data: { title: `Image ${imageCount + 1}`, year, desc: '' }, image: optimizedDataUrl };
@@ -1332,8 +1332,8 @@ fileInput.addEventListener('change', async () => {
           const imageCount = pages.filter(p => p.type === 'single').length;
           const dataUrl = ev.target.result;
           // Extract year from original image before optimization
-          let year = '';
-          try { year = await extractExifYearFromDataUrl(dataUrl); } catch {}
+          let year = '0000'; // Default year when EXIF is missing
+          try { const extractedYear = await extractExifYearFromDataUrl(dataUrl); if (extractedYear) year = extractedYear; } catch {}
           // Optimize image before saving
           const optimizedDataUrl = await optimizeImage(dataUrl);
           const page = { type: 'single', data: { title: `Image ${imageCount + 1}`, year, desc: '' }, image: optimizedDataUrl };
