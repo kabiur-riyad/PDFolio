@@ -42,9 +42,35 @@
 .fixed-year{position:absolute; right:20mm; bottom:18mm; font-size:12px; color:var(--page-muted); z-index:3}
 .fixed-year:empty{min-width: 2ch; min-height: 1em; display:inline-block}
 
+/* Diptych */
+.diptych{display:flex; gap:2mm; height:100%; width:100%; box-sizing:border-box; padding:18mm 20mm}
+.diptych.horizontal{flex-direction:row}
+.diptych.vertical{flex-direction:column}
+.diptych-image{flex:1; position:relative; overflow:hidden}
+.diptych-image img{width:100%; height:100%; object-fit:contain; display:block}
+.diptych-image .placeholder{display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--page-muted); font-size:14px; text-align:center}
+.diptych-image .placeholder svg{width:32px; height:32px; margin-bottom:8px; opacity:0.5}
+
+/* Diptych Modal */
+.diptych-images{display:flex; gap:12px; margin:16px 0}
+.diptych-image-slot{flex:1; min-height:120px}
+.diptych-image-upload{width:100%; height:120px; border:2px dashed var(--muted); border-radius:8px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:border-color 0.2s ease}
+.diptych-image-upload:hover{border-color:var(--accent)}
+.diptych-placeholder{display:flex; flex-direction:column; align-items:center; gap:8px; color:var(--muted); font-size:12px; text-align:center}
+.diptych-placeholder svg{width:24px; height:24px}
+
+/* Diptych Preview */
+.diptych-preview{display:flex; gap:8px; margin:16px 0; padding:16px; border:1px solid var(--muted); border-radius:8px; background:var(--page-paper)}
+.diptych-preview.horizontal{flex-direction:row}
+.diptych-preview.vertical{flex-direction:column}
+.diptych-preview-image{flex:1; min-height:80px; display:flex; align-items:center; justify-content:center; border:1px dashed var(--muted); border-radius:4px}
+.diptych-preview-image .diptych-placeholder{font-size:10px}
+
 /* Image wrapper */
 .image-wrap{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:160mm; height:160mm; display:flex;align-items:center;justify-content:center;overflow:hidden;z-index:1}
 .image-wrap img{max-width:100%; max-height:100%; object-fit:contain; display:block; margin:auto}
+.image-wrap.scaled{overflow:visible}
+.image-wrap.scaled img{width:100%; height:auto; max-height:none; object-fit:unset; position:absolute; left:0; top:50%; transform:translateY(-50%)}
 .image-wrap .placeholder{color:var(--page-muted); text-align:center; font-size:14px}
 .image-wrap.drag{box-shadow:inset 0 0 0 3px var(--accent)}
 

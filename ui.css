@@ -257,9 +257,9 @@ input, textarea {
 .reorder{display:flex; gap:6px; align-items:center; flex-shrink: 0;}
 .reorder .btn { width: auto; padding: 4px 8px; font-size: 12px; }
 
-/* Drag handle styles */
-.drag-handle {
-  cursor: grab;
+/* Menu button styles */
+.menu-btn {
+  cursor: pointer;
   padding: 4px;
   display: flex;
   align-items: center;
@@ -268,11 +268,11 @@ input, textarea {
   border-radius: 4px;
   transition: background-color 0.15s ease;
 }
-.drag-handle:hover {
+.menu-btn:hover {
   background-color: rgba(0,0,0,0.05);
 }
-.drag-handle:active {
-  cursor: grabbing;
+.menu-btn:active {
+  cursor: pointer;
 }
 
 /* Drag and drop states */
@@ -292,10 +292,10 @@ input, textarea {
 }
 
 /* Dark mode adjustments */
-body[data-ui-theme="dark"] .drag-handle:hover {
+body[data-ui-theme="dark"] .menu-btn:hover {
   background-color: rgba(255,255,255,0.1);
 }
-body[data-ui-theme="cozy"] .drag-handle:hover {
+body[data-ui-theme="cozy"] .menu-btn:hover {
   background-color: rgba(139, 94, 52, 0.1);
 }
 

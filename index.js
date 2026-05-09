@@ -148,6 +148,13 @@ window.addEventListener('drop', e => {
   e.preventDefault();
 });
 
+// Close context menus when clicking outside
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.context-menu') && !e.target.closest('.menu-btn')) {
+    document.querySelectorAll('.context-menu').forEach(m => m.remove());
+  }
+});
+
 const THEME_PRESETS = {
   default: {
     paper: '#ffffff',
@@ -735,8 +742,9 @@ function renderPages() {
       `;
     } else if (p.type === 'single') {
       el.classList.add('single');
+      const scaledClass = p.data.imageScaled ? 'scaled' : '';
       el.innerHTML = `
-        <div class="image-wrap" data-idx="${idx}">${p.image ? `<img src="${p.image}" alt="${escapeHtml(p.data.title || 'Image')}"/>` : `<div class="placeholder">Drop image here</div>`}</div>
+        <div class="image-wrap ${scaledClass}" data-idx="${idx}">${p.image ? `<img src="${p.image}" alt="${escapeHtml(p.data.title || 'Image')}"/>` : `<div class="placeholder">Drop image here</div>`}</div>
         <div class="fixed-meta">
           <div class="header">
             <div class="title editable">${escapeHtml(p.data.title || 'Untitled')}</div>
@@ -765,9 +773,10 @@ function renderPages() {
       // Calculate total dynamically based on current array state
       const seriesTotal = pages.filter(pg => pg.type === 'series-image' && pg.seriesTitle === p.seriesTitle).length;
       el.classList.add('series-image');
+      const scaledClass = p.data.imageScaled ? 'scaled' : '';
       el.innerHTML = `
         <div class="series-tag">Image ${currentIndexInSeries} of ${seriesTotal}</div>
-        <div class="image-wrap" data-idx="${idx}">${p.image ? `<img src="${p.image}" alt="${escapeHtml(p.data.title || 'Image')}"/>` : `<div class="placeholder">Drop image for: ${escapeHtml(p.data.title || 'Image ' + currentIndexInSeries)}</div>`}</div>
+        <div class="image-wrap ${scaledClass}" data-idx="${idx}">${p.image ? `<img src="${p.image}" alt="${escapeHtml(p.data.title || 'Image')}"/>` : `<div class="placeholder">Drop image for: ${escapeHtml(p.data.title || 'Image ' + currentIndexInSeries)}</div>`}</div>
         <div class="fixed-meta">
           <div class="header">
             <div class="title editable">${escapeHtml(p.data.title || 'Image ' + currentIndexInSeries)}</div>
@@ -862,16 +871,46 @@ function renderPagesList() {
     const reorder = document.createElement('div');
     reorder.className = 'reorder';
 
-    // Drag handle
-    const dragHandle = document.createElement('div');
-    dragHandle.className = 'drag-handle';
-    dragHandle.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 4a2 2 0 1 1 4 0 2 2 0 0 1-4 0zm0 8a2 2 0 1 1 4 0 2 2 0 0 1-4 0zm0 8a2 2 0 1 1 4 0 2 2 0 0 1-4 0z"/></svg>`;
-    dragHandle.style.cursor = 'grab';
-    dragHandle.style.padding = '4px';
-    dragHandle.style.display = 'flex';
-    dragHandle.style.alignItems = 'center';
-    dragHandle.style.justifyContent = 'center';
-    dragHandle.style.color = 'var(--muted)';
+    // Menu button
+    const menuBtn = document.createElement('div');
+    menuBtn.className = 'menu-btn';
+    menuBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 4a2 2 0 1 1 4 0 2 2 0 0 1-4 0zm0 8a2 2 0 1 1 4 0 2 2 0 0 1-4 0zm0 8a2 2 0 1 1 4 0 2 2 0 0 1-4 0z"/></svg>`;
+    menuBtn.style.cursor = 'pointer';
+    menuBtn.style.padding = '4px';
+    menuBtn.style.display = 'flex';
+    menuBtn.style.alignItems = 'center';
+    menuBtn.style.justifyContent = 'center';
+    menuBtn.style.color = 'var(--muted)';
+
+    // Add left-click context menu for image scaling
+    menuBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Only show scaling option for image pages
+      if (p.type !== 'single' && p.type !== 'series-image') return;
+      if (!p.image) return;
+      
+      // Remove existing context menus
+      document.querySelectorAll('.context-menu').forEach(m => m.remove());
+      
+      const menu = document.createElement('div');
+      menu.className = 'context-menu';
+      
+      const scaleBtn = document.createElement('button');
+      scaleBtn.textContent = p.data.imageScaled ? 'Reset image scale' : 'Set image scale to max';
+      scaleBtn.onclick = () => {
+        setImageScaleToMax(i);
+        menu.remove();
+      };
+      
+      menu.appendChild(scaleBtn);
+      document.body.appendChild(menu);
+      
+      const x = e.clientX, y = e.clientY;
+      menu.style.left = Math.min(x, window.innerWidth - menu.offsetWidth - 8) + 'px';
+      menu.style.top = Math.min(y, window.innerHeight - menu.offsetHeight - 8) + 'px';
+    });
 
     // Delete button
     const del = document.createElement('button');
@@ -884,7 +923,7 @@ function renderPagesList() {
       if (currentIdx >= 0) deletePage(currentIdx);
     };
 
-    reorder.appendChild(dragHandle);
+    reorder.appendChild(menuBtn);
     reorder.appendChild(del);
     item.appendChild(thumb);
     item.appendChild(meta);
@@ -897,7 +936,7 @@ function renderPagesList() {
     item.addEventListener('dragstart', (e) => {
       item.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
-      dragHandle.style.cursor = 'grabbing';
+      menuBtn.style.cursor = 'grabbing';
 
       // If dragging a series cover, collect all related images
       const seriesId = p.seriesTitle || (p.seriesObj && p.seriesObj.title);
@@ -922,7 +961,7 @@ function renderPagesList() {
 
     item.addEventListener('dragend', () => {
       item.classList.remove('dragging');
-      dragHandle.style.cursor = 'grab';
+      menuBtn.style.cursor = 'pointer';
       document.querySelectorAll('.page-item').forEach(p => p.classList.remove('drag-over', 'series-dragging'));
     });
 
@@ -1384,6 +1423,17 @@ document.getElementById('projectForm').addEventListener('submit', (e) => {
   // Set baseline after creation so initial state isn't considered "dirty"
   setBaseline();
 });
+
+function setImageScaleToMax(pageIndex) {
+  const page = pages[pageIndex];
+  if (!page || !page.image || (page.type !== 'single' && page.type !== 'series-image')) return;
+  
+  // Toggle the scaled state
+  page.data.imageScaled = !page.data.imageScaled;
+  
+  markDirty();
+  renderPages();
+}
 
 function escapeHtml(s) { if (s === undefined || s === null) return ''; return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
