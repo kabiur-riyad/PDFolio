@@ -363,6 +363,7 @@ const uiSettings = (() => {
     if (ls) {
       ls.setItem('uiTheme', settings.uiThemeMode);
       ls.setItem('uiDark', settings.uiDark ? '1' : '0');
+      ls.setItem('autosave', settings.autosave ? '1' : '0');
     }
   } catch {}
   return settings;
@@ -500,11 +501,16 @@ window.onbeforeunload = function(e) {
 
 let autosaveTimer = null;
 function scheduleAutosave() {
-  if (!uiSettings.autosave) return;
-  const hasAny = (typeof localStorage !== 'undefined') && !!localStorage.getItem('lastPortfolioJson');
-  if (!hasAny) return;
+  if (!uiSettings.autosave) {
+    console.log('Autosave disabled, skipping schedule');
+    return;
+  }
   if (autosaveTimer) clearTimeout(autosaveTimer);
-  autosaveTimer = setTimeout(() => { saveCurrentPortfolio(); }, 1500);
+  console.log('Scheduling autosave in 1.5 seconds');
+  autosaveTimer = setTimeout(() => { 
+    console.log('Executing autosave');
+    saveCurrentPortfolio(); 
+  }, 1500);
 }
 
 // Load on startup
@@ -1733,6 +1739,10 @@ async function exportPortfolioAsPDF() {
   } catch { alert('Print is unavailable in this environment.'); }
 }
 
+document.getElementById('saveBtn').addEventListener('click', async () => {
+  await saveCurrentPortfolio();
+});
+
 document.getElementById('printBtn').addEventListener('click', exportPortfolioAsPDF);
 
 // Track which images have been optimized (by original dataUrl hash)
@@ -1840,6 +1850,8 @@ async function saveCurrentPortfolio(shouldDownload = false, optimizeImages = fal
       downloadTextAsFile(payload, 'Portfolio.json');
     }
     clearDirty();
+    // Set baseline after successful save to prevent false dirty states
+    setBaseline();
   } catch (e) {}
 }
 
