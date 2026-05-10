@@ -314,6 +314,10 @@
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2Zm14-9h-4V3H9v8H5l7 7l7-7Z"/></svg>
         <span>Export to PDF</span>
       </button>
+      <button id="showMarkdownBtn" class="btn">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+        <span>Show TOON</span>
+      </button>
       <div class="io-group">
         <button id="exportJsonBtn" class="btn">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 20h14v-2H5v2Zm14-9h-4V3H9v8H5l7 7l7-7Z"/></svg>
@@ -367,6 +371,21 @@
   <div id="zoomControl" class="zoom-control" aria-label="Zoom control">
     <input id="zoomSlider" type="range" min="50" max="100" step="5" value="100" />
     <span id="zoomValue" class="small">100%</span>
+  </div>
+
+  <!-- TOON Editor Modal -->
+  <div id="markdownModal" class="modal">
+    <div class="modal-content markdown-modal-content">
+      <h2>Edit Portfolio TOON</h2>
+      <p class="small" style="margin-top:-12px;margin-bottom:12px;color:var(--muted)">Edit the TOON text below, then click Apply Changes to update your portfolio. Copy or download anytime.</p>
+      <textarea id="markdownOutput"></textarea>
+      <div class="buttons">
+        <button type="button" id="closeMarkdownBtn" class="btn secondary">Close</button>
+        <button type="button" id="downloadMarkdownBtn" class="btn secondary">Download .txt</button>
+        <button type="button" id="copyMarkdownBtn" class="btn secondary">Copy to Clipboard</button>
+        <button type="button" id="applyMarkdownBtn" class="btn">Apply Changes</button>
+      </div>
+    </div>
   </div>
 
   <script src="https://unpkg.com/@squoosh/lib@0.4.0/build/index.js"></script>

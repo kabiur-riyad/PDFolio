@@ -2006,6 +2006,397 @@ if (importJsonBtn) importJsonBtn.addEventListener('click', async () => {
   } catch {}
 });
 
+// Markdown export helpers
+function getImageOrientation(dataUrl) {
+  return new Promise((resolve) => {
+    if (!dataUrl || !dataUrl.startsWith('data:')) { resolve('Unknown'); return; }
+    const img = new Image();
+    img.onload = () => {
+      const r = img.naturalWidth / img.naturalHeight;
+      if (r > 1.05) resolve('Landscape');
+      else if (r < 0.95) resolve('Portrait');
+      else resolve('Square');
+    };
+    img.onerror = () => resolve('Unknown');
+    img.src = dataUrl;
+  });
+}
+
+function getImageId(page) {
+  if (!page.imageId) {
+    page.imageId = Math.random().toString(36).slice(2, 10);
+  }
+  return page.imageId;
+}
+
+async function generatePortfolioTOON() {
+  const lines = [];
+  const u = userInfo || {};
+
+  // AI Instructions
+  lines.push('# TOON: PDFolio portfolio (HTML and CSS based)');
+  lines.push('# Edit: cover fields, any PAGE block, TITLE/YEAR/DESCRIPTION. Change TYPE as needed.');
+  lines.push('# Do NOT edit: ORIENTATION, PAGE numbers, IMAGES count (auto-computed).');
+  lines.push('# Clone or reorder: copy/move a PAGE block; the IMAGE value carries the image ID and follows the page.');
+  lines.push('# Add image page: use IMAGE:yes, or copy an existing IMAGE:<value> to clone that image.');
+  lines.push('# Output: complete TOON with same keys and --- separators.');
+  lines.push('');
+
+  // Cover info
+  lines.push(`PORTFOLIO: ${escapeTOON(u.portfolioLabel || 'Portfolio')}`);
+  lines.push(`NAME: ${escapeTOON(u.name)}`);
+  lines.push(`YEARS: ${escapeTOON(u.years)}`);
+  lines.push('');
+  lines.push('STATEMENT:');
+  if (u.statement) lines.push(escapeTOON(u.statement));
+  lines.push('');
+  lines.push('---');
+
+  if (!pages.length) {
+    return lines.join('\n');
+  }
+
+  // Pre-compute orientations for all image pages in parallel
+  const imagePages = pages.filter(p => p.image && (p.type === 'single' || p.type === 'series-image'));
+  const orientations = await Promise.all(imagePages.map(p => getImageOrientation(p.image)));
+  const orientationMap = new Map();
+  imagePages.forEach((p, i) => orientationMap.set(p, orientations[i]));
+
+  let pageNum = 1;
+  pages.forEach((p) => {
+    if (p.type === 'cover') {
+      pageNum++;
+      return;
+    }
+
+    lines.push('');
+    lines.push(`PAGE ${pageNum}`);
+
+    if (p.type === 'single') {
+      lines.push(`TYPE: single`);
+      if (p.image) lines.push(`IMAGE: ${getImageId(p)}`);
+      const orient = orientationMap.get(p) || 'Unknown';
+      lines.push(`ORIENTATION: ${orient}`);
+      lines.push(`TITLE: ${escapeTOON(p.data.title || 'Untitled')}`);
+      if (p.data.year) lines.push(`YEAR: ${escapeTOON(p.data.year)}`);
+      lines.push('DESCRIPTION:');
+      if (p.data.desc) lines.push(escapeTOON(p.data.desc));
+    }
+
+    if (p.type === 'series-cover') {
+      lines.push(`TYPE: series-cover`);
+      lines.push(`TITLE: ${escapeTOON(p.data.title || 'Untitled Project')}`);
+      if (p.data.year) lines.push(`YEAR: ${escapeTOON(p.data.year)}`);
+      lines.push('DESCRIPTION:');
+      if (p.data.desc) lines.push(escapeTOON(p.data.desc));
+      lines.push(`IMAGES: ${p.data.total || 0}`);
+    }
+
+    if (p.type === 'series-image') {
+      lines.push(`TYPE: series-image`);
+      if (p.image) lines.push(`IMAGE: ${getImageId(p)}`);
+      const orient = orientationMap.get(p) || 'Unknown';
+      lines.push(`ORIENTATION: ${orient}`);
+      lines.push(`TITLE: ${escapeTOON(p.data.title || 'Image')}`);
+      if (p.data.year) lines.push(`YEAR: ${escapeTOON(p.data.year)}`);
+      lines.push('DESCRIPTION:');
+      if (p.data.desc) lines.push(escapeTOON(p.data.desc));
+    }
+
+    pageNum++;
+  });
+
+  return lines.join('\n');
+}
+
+function escapeTOON(text) {
+  if (text === undefined || text === null) return '';
+  return String(text);
+}
+
+// TOON -> Portfolio parser helpers
+function readTOONValue(lines, startIdx, knownKeys) {
+  const keySet = new Set(knownKeys.map(k => k.toUpperCase()));
+  let valueLines = [];
+  for (let i = startIdx; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t === '---') break;
+    const keyMatch = t.match(/^([A-Z][A-Z_0-9-]*):\s*(.*)$/);
+    if (keyMatch && keySet.has(keyMatch[1].toUpperCase())) break;
+    valueLines.push(lines[i]);
+  }
+  return valueLines.join('\n').trim();
+}
+
+function parseCoverFromTOON(text) {
+  const lines = text.split('\n');
+  let portfolioLabel = '';
+  let name = '';
+  let years = '';
+  let statement = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t.startsWith('PORTFOLIO:')) {
+      portfolioLabel = t.slice('PORTFOLIO:'.length).trim();
+    } else if (t.startsWith('NAME:')) {
+      name = t.slice('NAME:'.length).trim();
+    } else if (t.startsWith('YEARS:')) {
+      years = t.slice('YEARS:'.length).trim();
+    } else if (t === 'STATEMENT:') {
+      statement = readTOONValue(lines, i + 1, ['PORTFOLIO','NAME','YEARS','STATEMENT','PAGE']);
+    }
+  }
+
+  return { portfolioLabel, name, years, statement };
+}
+
+function parsePageBlockTOON(block) {
+  const lines = block.split('\n');
+  const fields = {};
+  const knownKeys = ['TYPE','IMAGE','ORIENTATION','TITLE','YEAR','DESCRIPTION','IMAGES','PAGE'];
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const match = raw.match(/^([A-Z][A-Z_0-9-]*):\s*(.*)$/);
+    if (!match) continue;
+    const key = match[1].toUpperCase();
+    const rest = match[2];
+    if (!knownKeys.includes(key)) continue;
+
+    if (key === 'DESCRIPTION') {
+      fields.DESCRIPTION = readTOONValue(lines, i + 1, knownKeys);
+    } else if (key === 'TYPE') {
+      fields.TYPE = rest.trim();
+    } else if (key === 'IMAGE') {
+      const v = rest.trim();
+      const lower = v.toLowerCase();
+      if (lower === 'yes') {
+        fields.IMAGE = true;
+      } else if (lower === 'no' || lower === '') {
+        fields.IMAGE = false;
+      } else {
+        fields.IMAGE = true;
+        fields.IMAGE_ID = v;
+      }
+    } else if (key === 'ORIENTATION') {
+      fields.ORIENTATION = rest.trim();
+    } else if (key === 'TITLE') {
+      fields.TITLE = rest.trim();
+    } else if (key === 'YEAR') {
+      fields.YEAR = rest.trim();
+    } else if (key === 'IMAGES') {
+      fields.IMAGES = parseInt(rest.trim(), 10) || 0;
+    }
+  }
+
+  const type = fields.TYPE || '';
+  const title = fields.TITLE || '';
+  const year = fields.YEAR || '';
+  const desc = fields.DESCRIPTION || '';
+
+  if (type === 'series-cover') {
+    return {
+      type: 'series-cover',
+      data: { title, year, desc, total: fields.IMAGES || 0 },
+      image: null,
+      seriesTitle: title
+    };
+  }
+
+  if (type === 'single') {
+    const page = {
+      type: 'single',
+      data: { title, year, desc },
+      image: null
+    };
+    if (fields.IMAGE_ID) page.imageId = fields.IMAGE_ID;
+    return page;
+  }
+
+  if (type === 'series-image') {
+    const page = {
+      type: 'series-image',
+      data: { title, year, desc },
+      image: null,
+      seriesTitle: ''
+    };
+    if (fields.IMAGE_ID) page.imageId = fields.IMAGE_ID;
+    return page;
+  }
+
+  return null;
+}
+
+function applyTOONChanges() {
+  if (!markdownOutput) return;
+  const text = markdownOutput.value;
+
+  const separatorIdx = text.indexOf('\n---\n');
+  const coverText = separatorIdx >= 0 ? text.slice(0, separatorIdx) : text;
+  const contentText = separatorIdx >= 0 ? text.slice(separatorIdx + 5) : '';
+
+  // Parse cover
+  const cover = parseCoverFromTOON(coverText);
+  userInfo.portfolioLabel = cover.portfolioLabel || userInfo.portfolioLabel || 'Portfolio';
+  userInfo.name = cover.name;
+  userInfo.years = cover.years;
+  userInfo.statement = cover.statement;
+
+  // Parse content pages
+  const contentLines = contentText.split('\n');
+  const newPages = [];
+  let currentBlock = [];
+  let started = false;
+
+  for (const line of contentLines) {
+    if (line.match(/^PAGE\s+\d+\s*$/)) {
+      if (started && currentBlock.length) {
+        const parsed = parsePageBlockTOON(currentBlock.join('\n'));
+        if (parsed) newPages.push(parsed);
+      }
+      currentBlock = [];
+      started = true;
+    } else if (started) {
+      currentBlock.push(line);
+    }
+  }
+  if (started && currentBlock.length) {
+    const parsed = parsePageBlockTOON(currentBlock.join('\n'));
+    if (parsed) newPages.push(parsed);
+  }
+
+  // Assign series metadata
+  let currentSeriesTitle = '';
+  const seriesCounts = {};
+  newPages.forEach(p => {
+    if (p.type === 'series-cover') {
+      currentSeriesTitle = p.data.title;
+      p.seriesTitle = currentSeriesTitle;
+    } else if (p.type === 'series-image') {
+      p.seriesTitle = currentSeriesTitle;
+      if (currentSeriesTitle) {
+        seriesCounts[currentSeriesTitle] = (seriesCounts[currentSeriesTitle] || 0) + 1;
+      }
+    }
+  });
+  newPages.forEach(p => {
+    if (p.type === 'series-image') {
+      p.seriesTotal = seriesCounts[p.seriesTitle] || 0;
+    }
+    if (p.type === 'series-cover') {
+      p.data.total = seriesCounts[p.data.title] || p.data.total;
+    }
+  });
+
+  // Build image ID lookup map from old pages
+  const idToImage = new Map();
+  pages.forEach(p => {
+    if (p.imageId && p.image) idToImage.set(p.imageId, p.image);
+  });
+
+  // Resolve images: IMAGE-ID lookup first (enables cloning), then index fallback
+  newPages.forEach((newPage, idx) => {
+    // 1. Match by IMAGE-ID (allows cross-page cloning)
+    if (newPage.imageId && idToImage.has(newPage.imageId)) {
+      newPage.image = idToImage.get(newPage.imageId);
+      return;
+    }
+    // 2. Fallback: match by index + type (preserves in-place edits)
+    const oldPage = pages[idx + 1];
+    if (oldPage && oldPage.type === newPage.type) {
+      if (newPage.type === 'series-image') {
+        if (oldPage.seriesTitle === newPage.seriesTitle) {
+          newPage.image = oldPage.image;
+        }
+      } else {
+        newPage.image = oldPage.image;
+      }
+    }
+  });
+
+  // Rebuild pages: keep existing cover(s), append new content
+  const coverPages = pages.filter(p => p.type === 'cover');
+  pages = [...coverPages, ...newPages];
+  if (!pages.some(p => p.type === 'cover')) {
+    pages.unshift({ type: 'cover', data: {}, image: null });
+  }
+
+  buildCoverPage();
+  renderPages();
+  markDirty();
+}
+
+// Markdown modal wiring
+const markdownModal = document.getElementById('markdownModal');
+const markdownOutput = document.getElementById('markdownOutput');
+const showMarkdownBtn = document.getElementById('showMarkdownBtn');
+const copyMarkdownBtn = document.getElementById('copyMarkdownBtn');
+const downloadMarkdownBtn = document.getElementById('downloadMarkdownBtn');
+const closeMarkdownBtn = document.getElementById('closeMarkdownBtn');
+
+if (showMarkdownBtn) {
+  showMarkdownBtn.addEventListener('click', async () => {
+    try {
+      const toon = await generatePortfolioTOON();
+      if (markdownOutput) markdownOutput.value = toon;
+      if (markdownModal) markdownModal.classList.add('show');
+    } catch (e) {
+      console.error('TOON generation failed:', e);
+    }
+  });
+}
+
+if (closeMarkdownBtn) {
+  closeMarkdownBtn.addEventListener('click', () => {
+    if (markdownModal) markdownModal.classList.remove('show');
+  });
+}
+
+if (markdownModal) {
+  markdownModal.addEventListener('click', (e) => {
+    if (e.target === markdownModal) markdownModal.classList.remove('show');
+  });
+}
+
+if (copyMarkdownBtn) {
+  copyMarkdownBtn.addEventListener('click', async () => {
+    if (!markdownOutput) return;
+    try {
+      await navigator.clipboard.writeText(markdownOutput.value);
+      const original = copyMarkdownBtn.textContent;
+      copyMarkdownBtn.textContent = 'Copied!';
+      setTimeout(() => { copyMarkdownBtn.textContent = original; }, 1500);
+    } catch {
+      // Fallback: select and copy
+      markdownOutput.select();
+      try { document.execCommand('copy'); } catch {}
+    }
+  });
+}
+
+if (downloadMarkdownBtn) {
+  downloadMarkdownBtn.addEventListener('click', () => {
+    if (!markdownOutput) return;
+    downloadTextAsFile(markdownOutput.value, 'Portfolio.txt');
+  });
+}
+
+const applyMarkdownBtn = document.getElementById('applyMarkdownBtn');
+if (applyMarkdownBtn) {
+  applyMarkdownBtn.addEventListener('click', () => {
+    try {
+      applyTOONChanges();
+      // Regenerate TOON to reflect applied changes
+      generatePortfolioTOON().then(toon => {
+        if (markdownOutput) markdownOutput.value = toon;
+      });
+    } catch (e) {
+      console.error('Failed to apply TOON changes:', e);
+    }
+  });
+}
+
 // Initialize
 loadUserInfo();
 
