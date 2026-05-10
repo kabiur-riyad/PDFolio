@@ -184,6 +184,7 @@ const preferencesModal = document.getElementById('preferencesModal');
 const prefAutosaveEl = document.getElementById('prefAutosave');
 const cancelPrefsBtn = document.getElementById('cancelPrefsBtn');
 const savePrefsBtn = document.getElementById('savePrefsBtn');
+const resetStorageBtn = document.getElementById('resetStorageBtn');
 const preferencesBtn = document.getElementById('preferencesBtn');
 
 function openPreferences() {
@@ -312,6 +313,26 @@ if (savePrefsBtn) savePrefsBtn.addEventListener('click', () => {
   if (preferencesModal) preferencesModal.classList.remove('show');
 });
 
+if (resetStorageBtn) resetStorageBtn.addEventListener('click', () => {
+  if (confirm('Are you sure you want to clear all browser storage? This will remove all saved portfolios, settings, and preferences. This action cannot be undone.')) {
+    try {
+      // Clear localStorage
+      if (typeof localStorage !== 'undefined') {
+        localStorage.clear();
+      }
+      // Clear sessionStorage
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.clear();
+      }
+      // Reset to default state
+      location.reload();
+    } catch (e) {
+      console.error('Error clearing storage:', e);
+      alert('Error clearing storage. Please try reloading the page.');
+    }
+  }
+});
+
 const LEGACY_PRESET_ALIASES = {
   light: 'default',
   dark: 'default-dark'
@@ -364,7 +385,7 @@ const uiSettings = (() => {
   const settings = {
     uiThemeMode: themeMode,
     uiDark: effectiveDark,
-    autosave: autosavePref === '1'
+    autosave: autosavePref === null ? true : autosavePref === '1' // Enable by default
   };
   try {
     if (ls) {
@@ -522,8 +543,21 @@ function scheduleAutosave() {
 
 // Load on startup
 async function loadUserInfo() {
-  const ls = (typeof localStorage !== 'undefined') ? localStorage : null;
-  const lastJson = ls && ls.getItem('lastPortfolioJson');
+  let lastJson = null;
+  let storage = null;
+  
+  // Try localStorage first
+  if (typeof localStorage !== 'undefined') {
+    lastJson = localStorage.getItem('lastPortfolioJson');
+    storage = localStorage;
+  }
+  
+  // Fallback to sessionStorage if localStorage is empty
+  if (!lastJson && typeof sessionStorage !== 'undefined') {
+    lastJson = sessionStorage.getItem('lastPortfolioJson');
+    storage = sessionStorage;
+  }
+  
   if (lastJson) {
     try {
       const obj = JSON.parse(lastJson);
@@ -534,11 +568,17 @@ async function loadUserInfo() {
       buildCoverPage();
       renderPages();
       clearDirty();
-      ls.setItem('hasRun', '1');
+      storage.setItem('hasRun', '1');
+      
+      // Alert if using sessionStorage fallback
+      if (storage === sessionStorage && sessionStorage.getItem('storageFallback') === 'true') {
+        console.warn('Portfolio loaded from sessionStorage (temporary storage)');
+      }
       return;
     } catch {}
   }
-  const hasRun = ls && ls.getItem('hasRun') === '1';
+  
+  const hasRun = storage && storage.getItem('hasRun') === '1';
   if (!hasRun) {
     ensureThemeConsistency();
     syncStylePresetRadios();
@@ -1688,17 +1728,24 @@ function readAscii(view, offset, count) { const chars = []; for (let i = 0; i < 
 function parseYearFromExifDate(s) { const m = /^([0-9]{4})/.exec(s || ''); return m ? m[1] : null; }
 
 const MAX_IMAGE_DIMENSION = 3000;
-const AVIF_QUALITY = 95;
 
 async function optimizeImage(dataUrl) {
-  // Skip if already AVIF
-  if (dataUrl.startsWith('data:image/avif')) {
+  // Skip if already WebP
+  if (dataUrl.startsWith('data:image/webp')) {
+    console.log('Image already optimized (WebP)');
     return dataUrl;
   }
 
   try {
+    // Get original image info
+    const originalSize = Math.round(dataUrl.length * 0.75 / 1024); // Base64 to KB
+    const originalType = dataUrl.split(':')[1].split(';')[0] || 'unknown';
+    
+    console.log(`🖼️  Image Optimization Started`);
+    console.log(`📊 Original: ${originalType} | Size: ${originalSize}KB`);
+    
     // Load image
-    const img = new Image();
+    const img = new window.Image();
     img.src = dataUrl;
     await new Promise((resolve, reject) => {
       img.onload = resolve;
@@ -1707,12 +1754,16 @@ async function optimizeImage(dataUrl) {
 
     // Calculate new dimensions
     let { width, height } = img;
+    const originalResolution = `${width}x${height}`;
     const maxDim = Math.max(width, height);
     if (maxDim > MAX_IMAGE_DIMENSION) {
       const scale = MAX_IMAGE_DIMENSION / maxDim;
       width = Math.round(width * scale);
       height = Math.round(height * scale);
     }
+    const newResolution = `${width}x${height}`;
+    
+    console.log(`📏 Resolution: ${originalResolution} → ${newResolution}`);
 
     // Draw to canvas
     const canvas = document.createElement('canvas');
@@ -1724,30 +1775,16 @@ async function optimizeImage(dataUrl) {
     // Get raw image data
     const imageData = ctx.getImageData(0, 0, width, height);
 
-    // Use Squoosh for AVIF encoding if available
-    if (typeof ImagePool !== 'undefined') {
-      try {
-        const imagePool = new ImagePool();
-        const image = imagePool.ingestImage(imageData);
-        await image.encode({
-          avif: { quality: AVIF_QUALITY }
-        });
-        const encoded = await image.encodedWith.avif;
-        const blob = new Blob([encoded.binary], { type: 'image/avif' });
-        const reader = new FileReader();
-        const result = await new Promise((resolve) => {
-          reader.onload = () => resolve(reader.result);
-          reader.readAsDataURL(blob);
-        });
-        await imagePool.close();
-        return result;
-      } catch (avifErr) {
-        console.warn('AVIF encoding failed, falling back to WebP:', avifErr);
-      }
-    }
-
-    // Fallback to WebP if AVIF fails or Squoosh unavailable
+    // Encode to WebP
+    console.log(`🔄 Encoding to WebP (Quality: 90%)`);
     const webpDataUrl = canvas.toDataURL('image/webp', 0.9);
+    
+    // Log WebP results
+    const webpSize = Math.round(webpDataUrl.length * 0.75 / 1024);
+    const compressionRatio = Math.round((1 - webpSize / originalSize) * 100);
+    console.log(`✅ WebP Complete: ${webpSize}KB (${compressionRatio}% smaller)`);
+    console.log(`🎯 Final: WebP | ${webpSize}KB | ${newResolution}`);
+    
     return webpDataUrl;
 
   } catch (err) {
@@ -1789,8 +1826,8 @@ async function exportPortfolioAsPDF() {
   } catch { alert('Print is unavailable in this environment.'); }
 }
 
-document.getElementById('saveBtn').addEventListener('click', async () => {
-  await saveCurrentPortfolio();
+document.getElementById('saveBtn').addEventListener('click', () => {
+  saveCurrentPortfolio();
 });
 
 document.getElementById('printBtn').addEventListener('click', exportPortfolioAsPDF);
@@ -1884,25 +1921,54 @@ function downloadTextAsFile(text, filename) {
 }
 
 // Save portfolio to localStorage; optionally trigger a JSON download
-async function saveCurrentPortfolio(shouldDownload = false, optimizeImages = false) {
+function saveCurrentPortfolio(shouldDownload = false, optimizeImages = false) {
   try {
+    console.log('saveCurrentPortfolio called');
     // No optimization on save - only optimize on import to prevent quality degradation
-    const payload = await getPortfolioPayload();
+    const payload = getPortfolioPayload();
+    console.log('Generated payload:', payload.substring(0, 100) + '...');
+    
+    let saved = false;
     if (typeof localStorage !== 'undefined') {
       try {
         localStorage.setItem('lastPortfolioJson', payload);
         localStorage.setItem('hasRun', '1');
+        console.log('Saved to localStorage successfully');
+        saved = true;
       } catch (storageErr) {
         console.warn('Could not save to localStorage:', storageErr);
+        if (storageErr.name === 'QuotaExceededError') {
+          // Try sessionStorage as fallback
+          try {
+            sessionStorage.setItem('lastPortfolioJson', payload);
+            sessionStorage.setItem('hasRun', '1');
+            sessionStorage.setItem('storageFallback', 'true');
+            console.log('Saved to sessionStorage as fallback');
+            saved = true;
+            alert('Storage quota exceeded. Portfolio saved in session storage only (will be lost when tab closes). Consider downloading your portfolio to save permanently.');
+          } catch (sessionErr) {
+            console.warn('Could not save to sessionStorage either:', sessionErr);
+            alert('Storage quota exceeded. Portfolio is too large to save in browser storage. Please download your portfolio to save it permanently.');
+          }
+        } else {
+          console.warn('Other localStorage error:', storageErr);
+        }
       }
     }
+    
     if (shouldDownload) {
       downloadTextAsFile(payload, 'Portfolio.json');
     }
-    clearDirty();
-    // Set baseline after successful save to prevent false dirty states
-    setBaseline();
-  } catch (e) {}
+    
+    if (saved) {
+      clearDirty();
+      // Set baseline after successful save to prevent false dirty states
+      setBaseline();
+    }
+    console.log('saveCurrentPortfolio completed');
+  } catch (e) {
+    console.error('Error in saveCurrentPortfolio:', e);
+  }
 }
 
 // Export / Import JSON buttons

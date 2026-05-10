@@ -121,6 +121,10 @@
         </div>
       </fieldset>
       <label><input type="checkbox" id="prefAutosave"> Enable Autosave</label>
+      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--muted);">
+        <button type="button" id="resetStorageBtn" class="btn secondary" style="width: 100%;">Clear Browser Storage</button>
+        <p class="small" style="margin: 8px 0 0 0; color: var(--muted);">This will remove all saved portfolios and settings from browser storage.</p>
+      </div>
       <div class="buttons">
         <button type="button" id="cancelPrefsBtn" class="btn secondary">Cancel</button>
         <button type="button" id="savePrefsBtn" class="btn">Save</button>
@@ -388,7 +392,6 @@
     </div>
   </div>
 
-  <script src="https://unpkg.com/@squoosh/lib@0.4.0/build/index.js"></script>
-  <script type="module" src="./index.js" defer></script>
+    <script type="module" src="./index.js" defer></script>
 </body>
 </html>
