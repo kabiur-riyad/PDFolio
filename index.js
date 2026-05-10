@@ -2034,7 +2034,7 @@ async function generatePortfolioTOON() {
   const u = userInfo || {};
 
   // AI Instructions
-  lines.push('# TOON: PDFolio portfolio (HTML and CSS based)');
+  lines.push('# TOON: Photography Portfolio made with a web based tool');
   lines.push('# Edit: cover fields, any PAGE block, TITLE/YEAR/DESCRIPTION. Change TYPE as needed.');
   lines.push('# Do NOT edit: ORIENTATION, PAGE numbers, IMAGES count (auto-computed).');
   lines.push('# Clone or reorder: copy/move a PAGE block; the IMAGE value carries the image ID and follows the page.');
