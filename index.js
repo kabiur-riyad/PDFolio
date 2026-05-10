@@ -1,3 +1,179 @@
+// IndexedDB Storage Module
+const PDFolioStorage = (function() {
+  const DB_NAME = 'PDFolioDB';
+  const DB_VERSION = 1;
+  const STORES = {
+    portfolio: 'portfolio',
+    settings: 'settings',
+    metadata: 'metadata'
+  };
+
+  let db = null;
+
+  async function initDB() {
+    return new Promise((resolve, reject) => {
+      if (db) {
+        resolve(db);
+        return;
+      }
+
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        db = request.result;
+        resolve(db);
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        
+        if (!db.objectStoreNames.contains(STORES.portfolio)) {
+          db.createObjectStore(STORES.portfolio);
+        }
+        if (!db.objectStoreNames.contains(STORES.settings)) {
+          db.createObjectStore(STORES.settings);
+        }
+        if (!db.objectStoreNames.contains(STORES.metadata)) {
+          db.createObjectStore(STORES.metadata);
+        }
+      };
+    });
+  }
+
+  async function set(storeName, key, value) {
+    try {
+      const db = await initDB();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([storeName], 'readwrite');
+        const store = transaction.objectStore(storeName);
+        const request = store.put(value, key);
+        
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+    } catch (error) {
+      console.warn('IndexedDB set failed, falling back to localStorage:', error);
+      try {
+        localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+      } catch (e) {
+        console.warn('localStorage fallback also failed:', e);
+      }
+    }
+  }
+
+  async function get(storeName, key) {
+    try {
+      const db = await initDB();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([storeName], 'readonly');
+        const store = transaction.objectStore(storeName);
+        const request = store.get(key);
+        
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+    } catch (error) {
+      console.warn('IndexedDB get failed, falling back to localStorage:', error);
+      try {
+        const value = localStorage.getItem(key);
+        return value;
+      } catch (e) {
+        console.warn('localStorage fallback also failed:', e);
+        return null;
+      }
+    }
+  }
+
+  async function remove(storeName, key) {
+    try {
+      const db = await initDB();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction([storeName], 'readwrite');
+        const store = transaction.objectStore(storeName);
+        const request = store.delete(key);
+        
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+    } catch (error) {
+      console.warn('IndexedDB remove failed, falling back to localStorage:', error);
+      try {
+        localStorage.removeItem(key);
+      } catch (e) {
+        console.warn('localStorage fallback also failed:', e);
+      }
+    }
+  }
+
+  async function clear() {
+    try {
+      const db = await initDB();
+      const storeNames = Object.values(STORES);
+      
+      for (const storeName of storeNames) {
+        await new Promise((resolve, reject) => {
+          const transaction = db.transaction([storeName], 'readwrite');
+          const store = transaction.objectStore(storeName);
+          const request = store.clear();
+          
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result);
+        });
+      }
+    } catch (error) {
+      console.warn('IndexedDB clear failed, falling back to localStorage:', error);
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch (e) {
+        console.warn('localStorage fallback also failed:', e);
+      }
+    }
+  }
+
+  async function migrateFromLocalStorage() {
+    const migrationKeys = [
+      'hasRun',
+      'lastPortfolioJson', 
+      'lastPortfolioPath'
+    ];
+
+    for (const key of migrationKeys) {
+      const value = localStorage.getItem(key);
+      if (value !== null) {
+        if (key === 'lastPortfolioJson' || key === 'lastPortfolioPath') {
+          await set(STORES.metadata, key, value);
+        } else if (key === 'hasRun') {
+          await set(STORES.settings, key, value);
+        }
+        localStorage.removeItem(key);
+      }
+    }
+  }
+
+  return {
+    setPortfolio: (key, value) => set(STORES.portfolio, key, value),
+    getPortfolio: (key) => get(STORES.portfolio, key),
+    setSettings: (key, value) => set(STORES.settings, key, value),
+    getSettings: (key) => get(STORES.settings, key),
+    setMetadata: (key, value) => set(STORES.metadata, key, value),
+    getMetadata: (key) => get(STORES.metadata, key),
+    removeSettings: (key) => remove(STORES.settings, key),
+    clearAll: clear,
+    migrateFromLocalStorage: migrateFromLocalStorage
+  };
+})();
+
+// Initialize storage and migrate from localStorage if needed
+(async function initStorage() {
+  try {
+    await PDFolioStorage.migrateFromLocalStorage();
+  } catch (error) {
+    console.warn('Storage migration failed:', error);
+  }
+})();
+
 // Web polyfill for Electron APIs used by the app
 (function(){
   if (window.electronAPI) return;
@@ -18,9 +194,9 @@
       const writable = await handle.createWritable();
       await writable.write(typeof payload === 'string' ? payload : String(payload));
       await writable.close();
-      try { localStorage.setItem('hasRun', '1'); } catch {}
-      try { localStorage.setItem('lastPortfolioPath', 'web-fs-handle'); } catch {}
-      try { localStorage.setItem('lastPortfolioJson', payload); } catch {}
+      await PDFolioStorage.setSettings('hasRun', '1');
+      await PDFolioStorage.setMetadata('lastPortfolioPath', 'web-fs-handle');
+      await PDFolioStorage.setMetadata('lastPortfolioJson', payload);
       return { success: true, filePath: handle.name || 'Portfolio.json' };
     } catch (e) {
       return { success: false, error: e && e.message ? e.message : String(e) };
@@ -38,9 +214,9 @@
       lastHandle = handle;
       const file = await handle.getFile();
       const text = await file.text();
-      try { localStorage.setItem('hasRun', '1'); } catch {}
-      try { localStorage.setItem('lastPortfolioPath', 'web-fs-handle'); } catch {}
-      try { localStorage.setItem('lastPortfolioJson', text); } catch {}
+      await PDFolioStorage.setSettings('hasRun', '1');
+      await PDFolioStorage.setMetadata('lastPortfolioPath', 'web-fs-handle');
+      await PDFolioStorage.setMetadata('lastPortfolioJson', text);
       return { success: true, data: text, filePath: handle.name || file.name };
     } catch (e) {
       return { success: false, error: e && e.message ? e.message : String(e) };
@@ -68,10 +244,10 @@
         const file = input.files && input.files[0];
         if (!file) { resolve({ success: false, canceled: true }); return; }
         const reader = new FileReader();
-        reader.onload = () => {
-          try { localStorage.setItem('hasRun', '1'); } catch {}
-          try { localStorage.setItem('lastPortfolioPath', 'web-upload'); } catch {}
-          try { localStorage.setItem('lastPortfolioJson', String(reader.result || '')); } catch {}
+        reader.onload = async () => {
+          await PDFolioStorage.setSettings('hasRun', '1');
+          await PDFolioStorage.setMetadata('lastPortfolioPath', 'web-upload');
+          await PDFolioStorage.setMetadata('lastPortfolioJson', String(reader.result || ''));
           resolve({ success: true, data: String(reader.result || ''), filePath: file.name });
         };
         reader.onerror = () => resolve({ success: false, error: 'Failed to read file' });
@@ -101,9 +277,9 @@
       if (supportsFS) return saveWithFS(payload);
       try {
         downloadBlob(payload, 'Portfolio.json');
-        try { localStorage.setItem('hasRun', '1'); } catch {}
-        try { localStorage.setItem('lastPortfolioPath', 'web-download'); } catch {}
-        try { localStorage.setItem('lastPortfolioJson', payload); } catch {}
+        await PDFolioStorage.setSettings('hasRun', '1');
+        await PDFolioStorage.setMetadata('lastPortfolioPath', 'web-download');
+        await PDFolioStorage.setMetadata('lastPortfolioJson', payload);
         return { success: true, filePath: 'download' };
       } catch (e) {
         return { success: false, error: e && e.message ? e.message : String(e) };
@@ -114,9 +290,9 @@
       if (supportsFS) return saveWithFS(payload);
       try {
         downloadBlob(payload, 'Portfolio.json');
-        try { localStorage.setItem('hasRun', '1'); } catch {}
-        try { localStorage.setItem('lastPortfolioPath', 'web-download'); } catch {}
-        try { localStorage.setItem('lastPortfolioJson', payload); } catch {}
+        await PDFolioStorage.setSettings('hasRun', '1');
+        await PDFolioStorage.setMetadata('lastPortfolioPath', 'web-download');
+        await PDFolioStorage.setMetadata('lastPortfolioJson', payload);
         return { success: true, filePath: 'download' };
       } catch (e) {
         return { success: false, error: e && e.message ? e.message : String(e) };
@@ -128,9 +304,9 @@
     },
     openPortfolioAt: async (_path) => {
       try {
-        const data = localStorage.getItem('lastPortfolioJson');
+        const data = await PDFolioStorage.getMetadata('lastPortfolioJson');
         if (!data) return { success: false, error: 'No recent portfolio' };
-        return { success: true, data, filePath: 'localStorage' };
+        return { success: true, data, filePath: 'IndexedDB' };
       } catch (e) {
         return { success: false, error: e && e.message ? e.message : String(e) };
       }
@@ -196,7 +372,29 @@ function openPreferences() {
     }
   } catch {}
   if (prefAutosaveEl) prefAutosaveEl.checked = !!uiSettings.autosave;
+  
+  // Update reset storage button with storage info
+  updateResetStorageButtonText();
+  
   if (preferencesModal) preferencesModal.classList.add('show');
+}
+
+// Update reset storage button text with storage usage
+async function updateResetStorageButtonText() {
+  if (!resetStorageBtn) return;
+  
+  try {
+    const storage = await calculateStorageUsage();
+    const originalText = resetStorageBtn.textContent || 'Clear Browser Storage';
+    
+    // Show storage info in button
+    resetStorageBtn.textContent = `${originalText} (${storage.total})`;
+    
+    // Store original text for restoration
+    resetStorageBtn.dataset.originalText = originalText;
+  } catch (error) {
+    console.warn('Could not update storage button text:', error);
+  }
 }
 
 function openUserForm() {
@@ -291,9 +489,20 @@ if (preferencesBtn) {
 
 if (cancelPrefsBtn) cancelPrefsBtn.addEventListener('click', () => {
   if (preferencesModal) preferencesModal.classList.remove('show');
+  
+  // Restore original button text
+  restoreResetStorageButtonText();
 });
 
-if (savePrefsBtn) savePrefsBtn.addEventListener('click', () => {
+// Restore original reset storage button text
+function restoreResetStorageButtonText() {
+  if (!resetStorageBtn || !resetStorageBtn.dataset.originalText) return;
+  
+  resetStorageBtn.textContent = resetStorageBtn.dataset.originalText;
+  delete resetStorageBtn.dataset.originalText;
+}
+
+if (savePrefsBtn) savePrefsBtn.addEventListener('click', async () => {
   const nextAutosave = !!(prefAutosaveEl && prefAutosaveEl.checked);
   let selectedMode = 'light';
   try {
@@ -311,12 +520,79 @@ if (savePrefsBtn) savePrefsBtn.addEventListener('click', () => {
   }
   applyUiTheme();
   if (preferencesModal) preferencesModal.classList.remove('show');
+  
+  // Restore original button text
+  restoreResetStorageButtonText();
 });
 
-if (resetStorageBtn) resetStorageBtn.addEventListener('click', () => {
-  if (confirm('Are you sure you want to clear all browser storage? This will remove all saved portfolios, settings, and preferences. This action cannot be undone.')) {
+// Function to calculate storage usage
+async function calculateStorageUsage() {
+  let localStorageSize = 0;
+  let sessionStorageSize = 0;
+  let indexedDBSize = 0;
+  
+  // Calculate localStorage size
+  if (typeof localStorage !== 'undefined') {
+    for (let key in localStorage) {
+      if (localStorage.hasOwnProperty(key)) {
+        localStorageSize += localStorage[key].length + key.length;
+      }
+    }
+  }
+  
+  // Calculate sessionStorage size
+  if (typeof sessionStorage !== 'undefined') {
+    for (let key in sessionStorage) {
+      if (sessionStorage.hasOwnProperty(key)) {
+        sessionStorageSize += sessionStorage[key].length + key.length;
+      }
+    }
+  }
+  
+  // Estimate IndexedDB size (this is approximate)
+  try {
+    const portfolioData = await PDFolioStorage.getMetadata('lastPortfolioJson');
+    const portfolioPath = await PDFolioStorage.getMetadata('lastPortfolioPath');
+    const hasRun = await PDFolioStorage.getSettings('hasRun');
+    
+    if (portfolioData) indexedDBSize += portfolioData.length + 'lastPortfolioJson'.length;
+    if (portfolioPath) indexedDBSize += portfolioPath.length + 'lastPortfolioPath'.length;
+    if (hasRun) indexedDBSize += hasRun.length + 'hasRun'.length;
+  } catch (error) {
+    console.warn('Could not calculate IndexedDB size:', error);
+  }
+  
+  const totalSize = localStorageSize + sessionStorageSize + indexedDBSize;
+  
+  return {
+    localStorage: formatBytes(localStorageSize),
+    sessionStorage: formatBytes(sessionStorageSize),
+    indexedDB: formatBytes(indexedDBSize),
+    total: formatBytes(totalSize),
+    totalBytes: totalSize
+  };
+}
+
+// Format bytes to human readable format
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+if (resetStorageBtn) resetStorageBtn.addEventListener('click', async () => {
+  // Calculate and show storage usage
+  const storage = await calculateStorageUsage();
+  
+  const message = `Are you sure you want to clear all browser storage? This will remove all saved portfolios, settings, and preferences. This action cannot be undone.\n\nCurrent storage usage:\n• Total: ${storage.total}\n• IndexedDB (portfolios): ${storage.indexedDB}\n• localStorage (settings): ${storage.localStorage}\n• sessionStorage (temporary): ${storage.sessionStorage}`;
+  
+  if (confirm(message)) {
     try {
-      // Clear localStorage
+      // Clear IndexedDB
+      await PDFolioStorage.clearAll();
+      // Clear localStorage as fallback
       if (typeof localStorage !== 'undefined') {
         localStorage.clear();
       }
@@ -446,7 +722,7 @@ let __printing = false;
 let __prevUiDark = null;
 let __prevHadExplicitUiPref = null;
 try {
-  window.addEventListener('beforeprint', () => {
+  window.addEventListener('beforeprint', async () => {
     __printing = true;
     __prevUiDark = uiSettings.uiDark;
     try {
@@ -461,13 +737,11 @@ try {
     try { if (document && document.documentElement) document.documentElement.setAttribute('data-force-light', '1'); } catch {}
     applyUiTheme();
   });
-  window.addEventListener('afterprint', () => {
+  window.addEventListener('afterprint', async () => {
     __printing = false;
     if (__prevUiDark !== null) uiSettings.uiDark = __prevUiDark;
     try {
-      if (typeof localStorage !== 'undefined') {
-        if (!__prevHadExplicitUiPref) localStorage.removeItem('uiDark');
-      }
+      if (typeof localStorage !== 'undefined' && !__prevHadExplicitUiPref) localStorage.removeItem('uiDark');
     } catch {}
     try { if (document && document.documentElement) document.documentElement.removeAttribute('data-force-light'); } catch {}
     applyUiTheme();
@@ -544,18 +818,22 @@ function scheduleAutosave() {
 // Load on startup
 async function loadUserInfo() {
   let lastJson = null;
-  let storage = null;
   
-  // Try localStorage first
-  if (typeof localStorage !== 'undefined') {
-    lastJson = localStorage.getItem('lastPortfolioJson');
-    storage = localStorage;
+  // Try IndexedDB first
+  try {
+    lastJson = await PDFolioStorage.getMetadata('lastPortfolioJson');
+  } catch (error) {
+    console.warn('Failed to load from IndexedDB:', error);
   }
   
-  // Fallback to sessionStorage if localStorage is empty
+  // Fallback to localStorage if IndexedDB is empty
+  if (!lastJson && typeof localStorage !== 'undefined') {
+    lastJson = localStorage.getItem('lastPortfolioJson');
+  }
+  
+  // Final fallback to sessionStorage
   if (!lastJson && typeof sessionStorage !== 'undefined') {
     lastJson = sessionStorage.getItem('lastPortfolioJson');
-    storage = sessionStorage;
   }
   
   if (lastJson) {
@@ -568,23 +846,28 @@ async function loadUserInfo() {
       buildCoverPage();
       renderPages();
       clearDirty();
-      storage.setItem('hasRun', '1');
-      
-      // Alert if using sessionStorage fallback
-      if (storage === sessionStorage && sessionStorage.getItem('storageFallback') === 'true') {
-        console.warn('Portfolio loaded from sessionStorage (temporary storage)');
-      }
+      await PDFolioStorage.setSettings('hasRun', '1');
       return;
     } catch {}
   }
   
-  const hasRun = storage && storage.getItem('hasRun') === '1';
+  // Check if app has run before using IndexedDB first
+  let hasRun = false;
+  try {
+    const hasRunValue = await PDFolioStorage.getSettings('hasRun');
+    hasRun = hasRunValue === '1';
+  } catch (error) {
+    // Fallback to localStorage
+    if (typeof localStorage !== 'undefined') {
+      hasRun = localStorage.getItem('hasRun') === '1';
+    }
+  }
   if (!hasRun) {
     ensureThemeConsistency();
     syncStylePresetRadios();
     const m = document.getElementById('firstRunModal');
     if (m) m.classList.add('show');
-    wireFirstRunHandlers();
+    await wireFirstRunHandlers();
     return;
   }
   ensureThemeConsistency();
@@ -593,13 +876,13 @@ async function loadUserInfo() {
   renderPages();
 }
 
-function wireFirstRunHandlers() {
+async function wireFirstRunHandlers() {
   const createBtn = document.getElementById('createPortfolioBtn');
   const openBtn = document.getElementById('openPortfolioBtn');
   const frThemeFieldset = document.getElementById('firstRunModal');
   if (frThemeFieldset && frThemeFieldset.dataset.themeWired !== '1') {
     frThemeFieldset.dataset.themeWired = '1';
-    const applyMode = (mode) => {
+    const applyMode = async (mode) => {
       uiSettings.uiThemeMode = mode;
       if (mode === 'dark') uiSettings.uiDark = true;
       else uiSettings.uiDark = false; // light or cozy
@@ -617,23 +900,21 @@ function wireFirstRunHandlers() {
       radios.forEach(r => { if (r.value === current) r.checked = true; });
     } catch {}
     radios.forEach(r => {
-      r.addEventListener('change', () => {
-        if (r.checked) applyMode(r.value);
+      r.addEventListener('change', async () => {
+        if (r.checked) await applyMode(r.value);
       });
     });
     // Apply initial
     try {
       const checked = frThemeFieldset.querySelector('input[name="firstRunUiTheme"]:checked');
-      applyMode(checked && checked.value ? checked.value : (uiSettings.uiThemeMode || 'light'));
-    } catch { applyMode(uiSettings.uiThemeMode || 'light'); }
+      await applyMode(checked && checked.value ? checked.value : (uiSettings.uiThemeMode || 'light'));
+    } catch { await applyMode(uiSettings.uiThemeMode || 'light'); }
   }
   if (createBtn) createBtn.onclick = async () => {
     try {
       const initial = await getPortfolioPayload();
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('hasRun', '1');
-        localStorage.setItem('lastPortfolioJson', initial);
-      }
+      await PDFolioStorage.setSettings('hasRun', '1');
+      await PDFolioStorage.setMetadata('lastPortfolioJson', initial);
       const m = document.getElementById('firstRunModal');
       if (m) m.classList.remove('show');
       const uim = document.getElementById('userInfoModal');
@@ -649,10 +930,8 @@ function wireFirstRunHandlers() {
     try {
       const res = await (window.electronAPI && window.electronAPI.openPortfolio ? window.electronAPI.openPortfolio() : Promise.resolve({ success: false }));
       if (res && res.success && res.data) {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('hasRun', '1');
-          localStorage.setItem('lastPortfolioJson', res.data);
-        }
+        await PDFolioStorage.setSettings('hasRun', '1');
+        await PDFolioStorage.setMetadata('lastPortfolioJson', res.data);
         const m = document.getElementById('firstRunModal');
         if (m) m.classList.remove('show');
         try {
@@ -704,7 +983,7 @@ document.getElementById('userInfoForm').addEventListener('submit', async (e) => 
   };
   userFormDraft = null;
   syncStylePresetRadios(selectedPreset);
-  try { localStorage.setItem('lastPortfolioJson', await getPortfolioPayload()); } catch {}
+  await PDFolioStorage.setMetadata('lastPortfolioJson', await getPortfolioPayload());
   await saveUserInfo();
   document.getElementById('userInfoModal').classList.remove('show');
   applyThemeFromUserInfo();
@@ -1552,6 +1831,11 @@ function applyThemeFromWorkingTheme() {
     if (t.bodyFontSize) root.style.setProperty('--page-body-font-size', t.bodyFontSize);
   } catch {}
 }
+function wireThemeModalInteractions() {
+  // Theme modal interactions are wired up inline in openThemeModal
+  // This function exists for compatibility but doesn't need to do anything
+}
+
 function openThemeModal() {
   const modal = document.getElementById('themeModal');
   if (!modal) return;
@@ -1655,7 +1939,7 @@ if (saveThemeBtn) saveThemeBtn.addEventListener('click', async () => {
   if (workingTheme) { const presetKey = getActivePreset(); userInfo.theme = { ...getPresetDefaults(presetKey), ...workingTheme }; userInfo.themePreset = presetKey; }
   workingPreset = null;
   applyThemeFromUserInfo();
-  try { localStorage.setItem('lastPortfolioJson', await getPortfolioPayload()); } catch {}
+  await PDFolioStorage.setMetadata('lastPortfolioJson', await getPortfolioPayload());
   await saveUserInfo();
   closeThemeModal();
   renderPages();
@@ -1810,7 +2094,7 @@ async function exportPortfolioAsPDF() {
     uiSettings.uiDark = false;
     try { if (document && document.documentElement) document.documentElement.setAttribute('data-force-light', '1'); } catch {}
     applyUiTheme();
-    const restore = () => {
+    const restore = async () => {
       __printing = false;
       if (__prevUiDark !== null) uiSettings.uiDark = __prevUiDark;
       try {
@@ -1819,15 +2103,15 @@ async function exportPortfolioAsPDF() {
       try { if (document && document.documentElement) document.documentElement.removeAttribute('data-force-light'); } catch {}
       applyUiTheme();
     };
-    const onAfterPrint = () => { window.removeEventListener('afterprint', onAfterPrint); restore(); };
+    const onAfterPrint = async () => { window.removeEventListener('afterprint', onAfterPrint); await restore(); };
     window.addEventListener('afterprint', onAfterPrint, { once: true });
-    setTimeout(() => { if (__printing) restore(); }, 10000);
+    setTimeout(async () => { if (__printing) await restore(); }, 10000);
     window.print();
   } catch { alert('Print is unavailable in this environment.'); }
 }
 
-document.getElementById('saveBtn').addEventListener('click', () => {
-  saveCurrentPortfolio();
+document.getElementById('saveBtn').addEventListener('click', async () => {
+  await saveCurrentPortfolio();
 });
 
 document.getElementById('printBtn').addEventListener('click', exportPortfolioAsPDF);
@@ -1921,7 +2205,7 @@ function downloadTextAsFile(text, filename) {
 }
 
 // Save portfolio to localStorage; optionally trigger a JSON download
-function saveCurrentPortfolio(shouldDownload = false, optimizeImages = false) {
+async function saveCurrentPortfolio(shouldDownload = false, optimizeImages = false) {
   try {
     console.log('saveCurrentPortfolio called');
     // No optimization on save - only optimize on import to prevent quality degradation
@@ -1929,31 +2213,13 @@ function saveCurrentPortfolio(shouldDownload = false, optimizeImages = false) {
     console.log('Generated payload:', payload.substring(0, 100) + '...');
     
     let saved = false;
-    if (typeof localStorage !== 'undefined') {
-      try {
-        localStorage.setItem('lastPortfolioJson', payload);
-        localStorage.setItem('hasRun', '1');
-        console.log('Saved to localStorage successfully');
-        saved = true;
-      } catch (storageErr) {
-        console.warn('Could not save to localStorage:', storageErr);
-        if (storageErr.name === 'QuotaExceededError') {
-          // Try sessionStorage as fallback
-          try {
-            sessionStorage.setItem('lastPortfolioJson', payload);
-            sessionStorage.setItem('hasRun', '1');
-            sessionStorage.setItem('storageFallback', 'true');
-            console.log('Saved to sessionStorage as fallback');
-            saved = true;
-            alert('Storage quota exceeded. Portfolio saved in session storage only (will be lost when tab closes). Consider downloading your portfolio to save permanently.');
-          } catch (sessionErr) {
-            console.warn('Could not save to sessionStorage either:', sessionErr);
-            alert('Storage quota exceeded. Portfolio is too large to save in browser storage. Please download your portfolio to save it permanently.');
-          }
-        } else {
-          console.warn('Other localStorage error:', storageErr);
-        }
-      }
+    try {
+      await PDFolioStorage.setMetadata('lastPortfolioJson', payload);
+      await PDFolioStorage.setSettings('hasRun', '1');
+      console.log('Saved to IndexedDB successfully');
+      saved = true;
+    } catch (storageErr) {
+      console.warn('Could not save to IndexedDB:', storageErr);
     }
     
     if (shouldDownload) {
@@ -1994,7 +2260,8 @@ if (newPortfolioBtn) newPortfolioBtn.addEventListener('click', async () => {
     applyThemeFromUserInfo();
     buildCoverPage();
     renderPages();
-    try { localStorage.setItem('hasRun', '1'); localStorage.setItem('lastPortfolioJson', getPortfolioPayload()); } catch {}
+    await PDFolioStorage.setSettings('hasRun', '1');
+    await PDFolioStorage.setMetadata('lastPortfolioJson', getPortfolioPayload());
     const uim = document.getElementById('userInfoModal');
     if (uim) {
       setUserFormMode(false);
@@ -2035,7 +2302,8 @@ if (exportJsonBtn) exportJsonBtn.addEventListener('click', async (e) => {
       // Fallback to forced download
       downloadTextAsFile(payload, 'Portfolio.json');
     }
-    try { localStorage.setItem('lastPortfolioJson', payload); localStorage.setItem('hasRun', '1'); } catch {}
+    await PDFolioStorage.setMetadata('lastPortfolioJson', payload);
+    await PDFolioStorage.setSettings('hasRun', '1');
     clearDirty();
   } catch {}
 });
@@ -2054,14 +2322,12 @@ if (importJsonBtn) importJsonBtn.addEventListener('click', async () => {
         buildCoverPage();
         renderPages();
         clearDirty();
-        if (typeof localStorage !== 'undefined') {
-          try {
-            localStorage.setItem('hasRun', '1');
-            localStorage.setItem('lastPortfolioJson', JSON.stringify({ appVersion: 'web', userInfo, pages }, null, 2));
-          } catch (storageErr) {
-            console.warn('Could not save to localStorage (quota exceeded):', storageErr);
-            // Import succeeded but couldn't cache - that's okay
-          }
+        try {
+          await PDFolioStorage.setSettings('hasRun', '1');
+          await PDFolioStorage.setMetadata('lastPortfolioJson', JSON.stringify({ appVersion: 'web', userInfo, pages }, null, 2));
+        } catch (storageErr) {
+          console.warn('Could not save to IndexedDB:', storageErr);
+          // Import succeeded but couldn't cache - that's okay
         }
       } catch (err) {
         console.error('JSON parse error:', err);
@@ -2463,8 +2729,45 @@ if (applyMarkdownBtn) {
   });
 }
 
-// Initialize
-loadUserInfo();
+// Apply UI theme immediately to prevent flash of unstyled content
+(function applyThemeImmediately() {
+  const ls = (typeof localStorage !== 'undefined') ? localStorage : null;
+  const uiDarkPref = ls ? ls.getItem('uiDark') : null;
+  const uiThemePref = ls ? ls.getItem('uiTheme') : null;
+  const validTheme = (v) => v === 'light' || v === 'dark' || v === 'cozy';
+  const themeMode = validTheme(uiThemePref) ? uiThemePref : 'light';
+  const explicitDark = uiDarkPref !== null ? (uiDarkPref === '1') : null;
+  const effectiveDark = themeMode === 'dark' ? true
+    : themeMode === 'cozy' ? false
+    : (explicitDark !== null ? explicitDark : false);
+  
+  // Apply theme to document immediately
+  if (document && document.documentElement) {
+    let themeName = 'light';
+    if (themeMode === 'cozy') {
+      themeName = 'cozy';
+    } else if (themeMode === 'dark' || effectiveDark) {
+      themeName = 'dark';
+    }
+    document.documentElement.setAttribute('data-ui-theme', themeName);
+  }
+})();
+
+// Initialize - Apply UI settings first before any rendering
+function initializeApp() {
+  // Apply UI theme immediately to prevent flash
+  applyUiTheme();
+  
+  // Load user info and portfolio data
+  loadUserInfo();
+}
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeApp);
+} else {
+  initializeApp();
+}
 
 // Zoom controls
 const zoomSlider = document.getElementById('zoomSlider');
@@ -2472,7 +2775,7 @@ const zoomValueEl = document.getElementById('zoomValue');
 const zoomControl = document.getElementById('zoomControl');
 let zoomHideTimer = null;
 function snap5(v) { return Math.round(v / 5) * 5; }
-function applyZoomFromValue(val) {
+async function applyZoomFromValue(val) {
   let v = parseInt(val, 10);
   if (isNaN(v)) v = 100;
   v = Math.max(50, Math.min(100, v));
@@ -2485,7 +2788,7 @@ function applyZoomFromValue(val) {
 }
 function showZoomOverlay() { if (zoomControl) zoomControl.classList.add('visible'); }
 function hideZoomOverlayDelayed(ms = 1200) { if (zoomHideTimer) clearTimeout(zoomHideTimer); zoomHideTimer = setTimeout(() => { if (zoomControl && !zoomControl.matches(':hover')) zoomControl.classList.remove('visible'); }, ms); }
-if (zoomSlider) { zoomSlider.addEventListener('input', (e) => { applyZoomFromValue(e.target.value); showZoomOverlay(); hideZoomOverlayDelayed(800); }); }
+if (zoomSlider) { zoomSlider.addEventListener('input', async (e) => { await applyZoomFromValue(e.target.value); showZoomOverlay(); hideZoomOverlayDelayed(800); }); }
 try {
   const canvas = document.getElementById('canvas');
   if (canvas) {
