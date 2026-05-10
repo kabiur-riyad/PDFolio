@@ -2240,6 +2240,13 @@ async function saveCurrentPortfolio(shouldDownload = false, optimizeImages = fal
 // Export / Import JSON buttons
 const newPortfolioBtn = document.getElementById('newPortfolioBtn');
 if (newPortfolioBtn) newPortfolioBtn.addEventListener('click', async () => {
+  // Warn user before creating new portfolio as it completely deletes the current one
+  const confirmed = confirm('Are you sure you want to create a new portfolio? This will completely delete your current portfolio from browser storage and cannot be undone.');
+  
+  if (!confirmed) {
+    return; // User cancelled the action
+  }
+  
   try {
     pages = [];
     userInfo = {
