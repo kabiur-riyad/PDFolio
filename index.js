@@ -358,6 +358,7 @@ const THEME_PRESETS = {
 // Preferences modal wiring
 const preferencesModal = document.getElementById('preferencesModal');
 const prefAutosaveEl = document.getElementById('prefAutosave');
+const prefCenterImagesAboveTitleEl = document.getElementById('prefCenterImagesAboveTitle');
 const cancelPrefsBtn = document.getElementById('cancelPrefsBtn');
 const savePrefsBtn = document.getElementById('savePrefsBtn');
 const resetStorageBtn = document.getElementById('resetStorageBtn');
@@ -372,6 +373,7 @@ function openPreferences() {
     }
   } catch {}
   if (prefAutosaveEl) prefAutosaveEl.checked = !!uiSettings.autosave;
+  if (prefCenterImagesAboveTitleEl) prefCenterImagesAboveTitleEl.checked = !!uiSettings.centerImagesAboveTitle;
   
   // Update reset storage button with storage info
   updateResetStorageButtonText();
@@ -504,6 +506,7 @@ function restoreResetStorageButtonText() {
 
 if (savePrefsBtn) savePrefsBtn.addEventListener('click', async () => {
   const nextAutosave = !!(prefAutosaveEl && prefAutosaveEl.checked);
+  const nextCenterImagesAboveTitle = !!(prefCenterImagesAboveTitleEl && prefCenterImagesAboveTitleEl.checked);
   let selectedMode = 'light';
   try {
     const checked = preferencesModal ? preferencesModal.querySelector('input[name="uiTheme"]:checked') : null;
@@ -513,12 +516,15 @@ if (savePrefsBtn) savePrefsBtn.addEventListener('click', async () => {
   if (selectedMode === 'dark') uiSettings.uiDark = true;
   else uiSettings.uiDark = false; // light or cozy
   uiSettings.autosave = nextAutosave;
+  uiSettings.centerImagesAboveTitle = nextCenterImagesAboveTitle;
   if (typeof localStorage !== 'undefined') {
     localStorage.setItem('uiTheme', selectedMode);
     localStorage.setItem('uiDark', uiSettings.uiDark ? '1' : '0');
     localStorage.setItem('autosave', uiSettings.autosave ? '1' : '0');
+    localStorage.setItem('centerImagesAboveTitle', uiSettings.centerImagesAboveTitle ? '1' : '0');
   }
   applyUiTheme();
+  renderPages();
   if (preferencesModal) preferencesModal.classList.remove('show');
   
   // Restore original button text
@@ -652,6 +658,7 @@ const uiSettings = (() => {
   const uiDarkPref = ls ? ls.getItem('uiDark') : null; // '1' | '0' | null
   const uiThemePref = ls ? ls.getItem('uiTheme') : null; // 'light' | 'dark' | 'cozy' | null
   const autosavePref = ls ? ls.getItem('autosave') : null;
+  const centerImagesAboveTitlePref = ls ? ls.getItem('centerImagesAboveTitle') : null;
   const validTheme = (v) => v === 'light' || v === 'dark' || v === 'cozy';
   const themeMode = validTheme(uiThemePref) ? uiThemePref : 'light';
   const explicitDark = uiDarkPref !== null ? (uiDarkPref === '1') : null;
@@ -661,13 +668,15 @@ const uiSettings = (() => {
   const settings = {
     uiThemeMode: themeMode,
     uiDark: effectiveDark,
-    autosave: autosavePref === null ? true : autosavePref === '1' // Enable by default
+    autosave: autosavePref === null ? true : autosavePref === '1', // Enable by default
+    centerImagesAboveTitle: centerImagesAboveTitlePref === null ? true : centerImagesAboveTitlePref === '1'
   };
   try {
     if (ls) {
       ls.setItem('uiTheme', settings.uiThemeMode);
       ls.setItem('uiDark', settings.uiDark ? '1' : '0');
       ls.setItem('autosave', settings.autosave ? '1' : '0');
+      ls.setItem('centerImagesAboveTitle', settings.centerImagesAboveTitle ? '1' : '0');
     }
   } catch {}
   return settings;
@@ -1060,6 +1069,7 @@ function renderPages() {
         </div>
       `;
     } else if (p.type === 'single') {
+      if (uiSettings.centerImagesAboveTitle) el.classList.add('center-image-to-title');
       el.classList.add('single');
       const scaledClass = p.data.imageScaled ? 'scaled' : '';
       el.innerHTML = `
@@ -1091,6 +1101,7 @@ function renderPages() {
       }
       // Calculate total dynamically based on current array state
       const seriesTotal = pages.filter(pg => pg.type === 'series-image' && pg.seriesTitle === p.seriesTitle).length;
+      if (uiSettings.centerImagesAboveTitle) el.classList.add('center-image-to-title');
       el.classList.add('series-image');
       const scaledClass = p.data.imageScaled ? 'scaled' : '';
       el.innerHTML = `
@@ -1107,8 +1118,23 @@ function renderPages() {
     }
     canvas.appendChild(el);
   });
+  updateImageTitleCenters();
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(updateImageTitleCenters);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateImageTitleCenters).catch(() => {});
   attachPageInteractions();
   renderPagesList();
+}
+
+function updateImageTitleCenters() {
+  const canvas = document.getElementById('canvas');
+  if (!canvas) return;
+  canvas.querySelectorAll('.page.center-image-to-title').forEach(pageEl => {
+    const fixedMeta = pageEl.querySelector('.fixed-meta');
+    if (!fixedMeta) return;
+    const titleTop = fixedMeta.offsetTop;
+    if (!Number.isFinite(titleTop) || titleTop <= 0) return;
+    pageEl.style.setProperty('--image-center-y', `${Math.round(titleTop / 2)}px`);
+  });
 }
 
 function renderPagesList() {
@@ -1615,6 +1641,7 @@ function attachPageInteractions() {
       if (el.classList.contains('year')) p.data.year = el.innerText.trim();
       if (el.classList.contains('desc')) p.data.desc = el.innerText.trim();
       if (el.classList.contains('series-desc')) p.data.desc = el.innerText.trim();
+      updateImageTitleCenters();
       renderPagesList();
       markDirty();
     };
